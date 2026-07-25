@@ -1,0 +1,129 @@
+# Copyright 2026 The ODML Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: "Build Windows CLI (Manual)"
+
+on:
+  workflow_dispatch: ~
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: "Build-Win-CLI"
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    permissions:
+      actions: write  # For gh cache delete.
+      contents: read
+    env:
+      # Clear ANDROID_NDK_HOME: Windows_x64 has NDK but lacks permission to
+      # create symlinks required by androidndk rules.
+      ANDROID_NDK_HOME: ""
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: bazel-contrib/setup-bazel@0.19.0
+        with:
+          # Avoid downloading Bazel every time.
+          bazelisk-cache: true
+          # Store build cache per workflow.
+          disk-cache: ${{ github.workflow }}
+          # Share repository cache between workflows.
+          repository-cache: true
+
+      - name: Set up Bazel output base
+        id: setup
+        run: |
+          $BAZEL_OUTPUT_BASE = "C:/w"
+          if ($env:GITHUB_WORKSPACE -match "^[Dd]:") {
+              $BAZEL_OUTPUT_BASE = "D:/w"
+          }
+          $SHORT_SHA = "${{ github.sha }}".SubString(0, 8)
+          echo "BAZEL_OUTPUT_BASE=${BAZEL_OUTPUT_BASE}-${SHORT_SHA}" >> "$env:GITHUB_ENV"
+          echo "SHORT_SHA=${SHORT_SHA}" >> "$env:GITHUB_OUTPUT"
+      - name: Clean Bazel cache if refreshing
+        if: env.REFRESH_CACHE == 'true'
+        continue-on-error: true
+        run: bazel --output_base="$env:BAZEL_OUTPUT_BASE" clean --expunge
+
+      - name: Restore Bazel cache
+        id: bazel-cache
+        if: env.REFRESH_CACHE != 'true'
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: ~/.cache/bazel-windows
+          key: ${{ github.workflow }}-${{ hashFiles('**/WORKSPACE', '**/.bazelrc') }}-${{ hashFiles('**/BUILD*') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ github.workflow }}-${{ hashFiles('**/WORKSPACE', '**/.bazelrc') }}-${{ hashFiles('**/BUILD*') }}-
+            ${{ github.workflow }}-${{ hashFiles('**/WORKSPACE', '**/.bazelrc') }}-
+            ${{ github.workflow }}-
+      - name: Build C++ binary
+        run: |
+          bazel --output_base="$env:BAZEL_OUTPUT_BASE" `
+            build --disk_cache=~/.cache/bazel-windows `
+            --deleted_packages=swift `
+            --build_tag_filters='-nowindows' `
+            //runtime/engine:litert_lm_main
+      - name: Build Python CLI wheel
+        run: |
+          bazel --output_base="$env:BAZEL_OUTPUT_BASE" `
+            build --disk_cache=~/.cache/bazel-windows `
+            --deleted_packages=swift `
+            //python/litert_lm_cli:wheel
+      - name: Collect artifacts
+        run: |
+          New-Item -ItemType Directory -Path "dist" -Force
+          $exe = "bazel-bin/runtime/engine/litert_lm_main.exe"
+          if (Test-Path $exe) {
+              Copy-Item $exe "dist/litert_lm_main.windows_x86_64.exe"
+              Write-Host "Collected: litert_lm_main.windows_x86_64.exe"
+          } else {
+              Write-Warning "litert_lm_main.exe not found at $exe"
+          }
+          $wheels = Get-ChildItem "bazel-bin/python/litert_lm_cli/" -Filter "*.whl" -ErrorAction SilentlyContinue
+          foreach ($whl in $wheels) {
+              Copy-Item $whl.FullName "dist/"
+              Write-Host "Collected: $($whl.Name)"
+          }
+          Write-Host "`nArtifacts:"
+          Get-ChildItem dist/ | Select-Object Name, @{Name="Size(KB)";Expression={[math]::Round($_.Length/1KB, 1)}}
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: litert-lm-windows-${{ github.ref_name }}-${{ steps.setup.outputs.SHORT_SHA }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Delete old cache entry if refreshing
+        if: env.REFRESH_CACHE == 'true'
+        continue-on-error: true
+        run: |
+          gh cache delete "${{ github.workflow }}-${{ hashFiles('**/WORKSPACE', '**/.bazelrc') }}-${{ hashFiles('**/BUILD*') }}-${{ github.sha }}"
+      - name: Save Bazel cache
+        if: env.REFRESH_CACHE == 'true' || steps.bazel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/bazel-windows
+          key: ${{ github.workflow }}-${{ hashFiles('**/WORKSPACE', '**/.bazelrc') }}-${{ hashFiles('**/BUILD*') }}-${{ github.sha }}
