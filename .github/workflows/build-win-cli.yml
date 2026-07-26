@@ -35,6 +35,7 @@ jobs:
       # Clear ANDROID_NDK_HOME: Windows_x64 has NDK but lacks permission to
       # create symlinks required by androidndk rules.
       ANDROID_NDK_HOME: ""
+      PYTHON_VERSION: "3.13"
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -91,7 +92,11 @@ jobs:
           bazel --output_base="$env:BAZEL_OUTPUT_BASE" `
             build --disk_cache=~/.cache/bazel-windows `
             --deleted_packages=swift `
-            //python/litert_lm_cli:wheel
+            --repo_env=HERMETIC_PYTHON_VERSION=$PYTHON_VERSION `
+            --@rules_python//python/config_settings:python_version=$PYTHON_VERSION `
+            --define=PYPI_NIGHTLY=1 `
+            --define=PYPI_NIGHTLY_DATE=$DATE `
+            -c opt //python/litert_lm:litert_lm_wheel
       - name: Collect artifacts
         run: |
           New-Item -ItemType Directory -Path "dist" -Force
