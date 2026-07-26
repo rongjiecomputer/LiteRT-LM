@@ -96,7 +96,7 @@ jobs:
             --@rules_python//python/config_settings:python_version="$env:PYTHON_VERSION" `
             --define=PYPI_NIGHTLY=1 `
             --define=PYPI_NIGHTLY_DATE=$DATE `
-            -c opt //python/litert_lm:wheel
+            -c opt //python/litert_lm:wheel //python/litert_lm_cli:wheel //python/litert_lm_builder:wheel
       - name: Collect artifacts
         run: |
           New-Item -ItemType Directory -Path "dist" -Force
@@ -107,10 +107,10 @@ jobs:
           } else {
               Write-Warning "litert_lm_main.exe not found at $exe"
           }
-          $wheels = Get-ChildItem "bazel-bin/python/litert_lm_cli/" -Filter "*.whl" -ErrorAction SilentlyContinue
-          foreach ($whl in $wheels) {
-              Copy-Item $whl.FullName "dist/"
-              Write-Host "Collected: $($whl.Name)"
+          $paths = "bazel-bin/python/litert_lm_cli/", "bazel-bin/python/litert_lm/", "bazel-bin/python/litert_lm_builder/"
+          Get-ChildItem -Path $paths -Filter "*.whl" -ErrorAction SilentlyContinue | ForEach-Object {
+              Copy-Item $_.FullName "dist/"
+              Write-Host "Collected: $($_.Name)"
           }
           Write-Host "`nArtifacts:"
           Get-ChildItem dist/ | Select-Object Name, @{Name="Size(KB)";Expression={[math]::Round($_.Length/1KB, 1)}}
