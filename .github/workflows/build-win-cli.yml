@@ -92,11 +92,11 @@ jobs:
           bazel --output_base="$env:BAZEL_OUTPUT_BASE" `
             build --disk_cache=~/.cache/bazel-windows `
             --deleted_packages=swift `
-            --repo_env=HERMETIC_PYTHON_VERSION=$PYTHON_VERSION `
-            --@rules_python//python/config_settings:python_version=$PYTHON_VERSION `
+            --repo_env=HERMETIC_PYTHON_VERSION="$env:PYTHON_VERSION" `
+            --@rules_python//python/config_settings:python_version="$env:PYTHON_VERSION" `
             --define=PYPI_NIGHTLY=1 `
             --define=PYPI_NIGHTLY_DATE=$DATE `
-            -c opt //python/litert_lm:litert_lm_wheel
+            -c opt //python/litert_lm:wheel
       - name: Collect artifacts
         run: |
           New-Item -ItemType Directory -Path "dist" -Force
